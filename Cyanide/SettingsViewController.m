@@ -117,6 +117,7 @@ extern int  escape_sbx_demo3(void);
 
 static BOOL g_kexploit_done = NO;
 static volatile int g_settings_actions_running = 0;
+static volatile int g_settings_respring_cleanup_running = 0;
 static volatile int g_settings_actions_rerun_requested = 0;
 static volatile int g_springboard_rc_ready = 0;
 static volatile int g_springboard_sandbox_escaped = 0;
@@ -154,6 +155,16 @@ static const useconds_t kAxonLiteLiveBackgroundIntervalUS = 1500000;
 static const NSUInteger kAxonLiteLiveMaxTicks = 43200;
 static NSString * const kSettingsRemoteCallStateDidChangeNotification = @"SettingsRemoteCallStateDidChangeNotification";
 NSString * const kSettingsActionsDidCompleteNotification = @"SettingsActionsDidCompleteNotification";
+static NSString * const kSettingsCleanupStateDidChangeNotification = @"SettingsCleanupStateDidChangeNotification";
+
+static void settings_notify_cleanup_state_changed(void)
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:kSettingsCleanupStateDidChangeNotification
+                          object:nil];
+    });
+}
 static NSArray<NSString *> * const kPowercuffLevels = nil;
 
 // Session-scoped record of which tweaks were actually applied since launch.
@@ -985,6 +996,7 @@ static void settings_queue_terminal_kexploit_cleanup(const char *reason)
         log_user("[CLEANUP] Clean Up is already queued.\n");
         return;
     }
+    settings_notify_cleanup_state_changed();
 
     settings_request_all_live_loops_stop("queued terminal cleanup");
     settings_end_statbar_background_task_async("queued terminal cleanup");
@@ -996,6 +1008,7 @@ static void settings_queue_terminal_kexploit_cleanup(const char *reason)
         } @finally {
             if (locked) __sync_lock_release(&g_settings_actions_running);
             __sync_lock_release(&g_settings_cleanup_running);
+            settings_notify_cleanup_state_changed();
         }
     });
 }
@@ -2353,6 +2366,18 @@ typedef NS_ENUM(NSInteger, RootSection) {
                                              selector:@selector(remoteCallStateDidChange:)
                                                  name:kSettingsRemoteCallStateDidChangeNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(cleanupStateDidChange:)
+                                                 name:kSettingsCleanupStateDidChangeNotification
+                                               object:nil];
+}
+
+- (void)cleanupStateDidChange:(NSNotification *)note
+{
+    (void)note;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.tableView reloadData];
+    });
 }
 
 - (void)installInstallerReturnButtonIfNeeded
@@ -2989,11 +3014,11 @@ static void cyanide_upload_log_if_enabled(void) {
             primary.textColor = supported ? self.view.tintColor : UIColor.tertiaryLabelColor;
             primary.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
         } else if (indexPath.row == 1) {
-            primary.text = @"Clean Up";
+            primary.text = g_settings_cleanup_running ? @" " : @"Clean Up";
             primary.textColor = cleanupEnabled ? UIColor.systemRedColor : UIColor.tertiaryLabelColor;
             primary.font = [UIFont systemFontOfSize:17];
         } else if (indexPath.row == 2) {
-            primary.text = @"Respring";
+            primary.text = g_settings_respring_cleanup_running ? @" " : @"Respring";
             primary.textColor = supported ? UIColor.systemOrangeColor : UIColor.tertiaryLabelColor;
             primary.font = [UIFont systemFontOfSize:17];
         } else {
@@ -3002,6 +3027,27 @@ static void cyanide_upload_log_if_enabled(void) {
             primary.font = [UIFont systemFontOfSize:17];
         }
         [cell.contentView addSubview:primary];
+
+        // Clean Up + Respring rows: replace the label with a spinning indicator
+        // while cleanup is in progress so the user sees we're not hung.
+        BOOL showSpinner =
+            (indexPath.row == 1 && g_settings_cleanup_running) ||
+            (indexPath.row == 2 && g_settings_respring_cleanup_running);
+        if (showSpinner) {
+            UIActivityIndicatorView *spin =
+                [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:
+                    UIActivityIndicatorViewStyleMedium];
+            spin.translatesAutoresizingMaskIntoConstraints = NO;
+            spin.color = (indexPath.row == 2) ? UIColor.systemOrangeColor : UIColor.systemRedColor;
+            spin.hidesWhenStopped = YES;
+            [spin startAnimating];
+            [cell.contentView addSubview:spin];
+            [NSLayoutConstraint activateConstraints:@[
+                [spin.centerXAnchor constraintEqualToAnchor:primary.centerXAnchor],
+                [spin.centerYAnchor constraintEqualToAnchor:primary.centerYAnchor],
+            ]];
+        }
+
         if (!rowEnabled) {
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
             cell.userInteractionEnabled = NO;
@@ -3017,12 +3063,19 @@ static void cyanide_upload_log_if_enabled(void) {
             detailText = settings_unsupported_message();
             detailColor = UIColor.systemRedColor;
         } else if (indexPath.row == 1) {
-            detailText = cleanupEnabled
-                ? @"Stops live SpringBoard sessions, parks the KRW socket state, and closes this app's local KRW fds. Next run tries launchd recovery first."
-                : @"No local KRW session.";
-            detailColor = cleanupEnabled ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
+            if (g_settings_cleanup_running) {
+                detailText = @"Cleaning up…";
+                detailColor = UIColor.secondaryLabelColor;
+            } else {
+                detailText = cleanupEnabled
+                    ? @"Stops live SpringBoard sessions, parks the KRW socket state, and closes this app's local KRW fds. Next run tries launchd recovery first."
+                    : @"No local KRW session.";
+                detailColor = cleanupEnabled ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
+            }
         } else if (indexPath.row == 2) {
-            detailText = @"Clean up is auto run prior to respring to ensure a clean state.";
+            detailText = g_settings_respring_cleanup_running
+                ? @"Cleaning up…"
+                : @"Clean up is auto run prior to respring to ensure a clean state.";
             detailColor = supported ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
         } else if (indexPath.row == 3) {
             detailText = anyInstalledOrQueued
@@ -3316,10 +3369,14 @@ static void cyanide_upload_log_if_enabled(void) {
                         return;
                     }
 
+                    __sync_lock_test_and_set(&g_settings_respring_cleanup_running, 1);
+                    settings_notify_cleanup_state_changed();
                     @try {
                         settings_prepare_for_respring_sync();
                     } @finally {
                         __sync_lock_release(&g_settings_actions_running);
+                        __sync_lock_release(&g_settings_respring_cleanup_running);
+                        settings_notify_cleanup_state_changed();
                     }
 
                     dispatch_async(dispatch_get_main_queue(), ^{

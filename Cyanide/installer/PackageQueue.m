@@ -107,8 +107,11 @@ NSString * const PackageQueueDidChangeNotification = @"PackageQueueDidChangeNoti
 
 - (void)clear
 {
+    // Always fire notifyChange — observers like QueuePopupBar drive their
+    // visibility off pendingCount and need a kick to re-evaluate when the
+    // queue empties (e.g. after Reset All Packages drained the isQueuedForApply
+    // packages via applyCommittedState:NO before clear() got a chance to act).
     NSArray<Package *> *queuedForApply = self.queuedInstalls;
-    if (queuedForApply.count == 0 && self.uninstalls.count == 0) return;
     for (Package *pkg in queuedForApply) {
         if (![self packageInArray:self.installs matching:pkg] && pkg.isQueuedForApply) {
             [pkg applyCommittedState:NO];
