@@ -15,6 +15,8 @@ xcuserdata/
 
 ## Local build artifacts produced by scripts/build.sh
 /build/
+## Regenerated each build by scripts/gen-changelog.sh
+/Cyanide/Changelog.plist
 
 ## Cyanide diagnostic logs pulled from R2 (local mirror, not committed)
 /logs/

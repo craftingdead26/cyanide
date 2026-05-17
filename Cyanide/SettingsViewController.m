@@ -2299,13 +2299,60 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
 };
 
 typedef NS_ENUM(NSInteger, RootSection) {
-    RootSectionWarning = 0,
+    RootSectionChangelog = 0,
     RootSectionActions,
     RootSectionTweakBundles,
     RootSectionSystemBundles,
     RootSectionAbout,
+    RootSectionWarning,
     RootSectionCount,
 };
+
+// Loads Cyanide/Changelog.plist (generated at build time by
+// scripts/gen-changelog.sh from the last N release tags). Each entry is a
+// dict with keys "version" (NSString), "date" (ISO yyyy-MM-dd NSString), and
+// "changes" (NSArray<NSString *>). Empty array when the plist is missing or
+// malformed — the "What's New" section silently hides itself in that case.
+static NSArray<NSDictionary *> *settings_changelog_entries(void)
+{
+    static NSArray<NSDictionary *> *entries = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *path = [[NSBundle mainBundle] pathForResource:@"Changelog" ofType:@"plist"];
+        NSArray *raw = path ? [NSArray arrayWithContentsOfFile:path] : nil;
+        NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
+        for (id obj in raw) {
+            if (![obj isKindOfClass:[NSDictionary class]]) continue;
+            NSDictionary *d = (NSDictionary *)obj;
+            NSString *version = d[@"version"];
+            NSArray *changes = d[@"changes"];
+            if (![version isKindOfClass:[NSString class]] || version.length == 0) continue;
+            if (![changes isKindOfClass:[NSArray class]] || changes.count == 0) continue;
+            [out addObject:d];
+        }
+        entries = [out copy];
+    });
+    return entries;
+}
+
+// "2026-05-15" -> "May 15". Falls back to the raw string on parse failure.
+static NSString *settings_pretty_date_for_iso(NSString *iso)
+{
+    if (!iso.length) return @"";
+    static NSDateFormatter *in = nil;
+    static NSDateFormatter *out = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        in  = [[NSDateFormatter alloc] init];
+        in.dateFormat = @"yyyy-MM-dd";
+        in.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+        out = [[NSDateFormatter alloc] init];
+        out.dateFormat = @"MMM d";
+        out.locale = [NSLocale currentLocale];
+    });
+    NSDate *date = [in dateFromString:iso];
+    return date ? [out stringFromDate:date] : iso;
+}
 
 @interface SettingsViewController ()
 @property (nonatomic, strong) UISegmentedControl *powercuffSegmented;
@@ -2468,7 +2515,7 @@ typedef NS_ENUM(NSInteger, RootSection) {
     [icon setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
 
     UILabel *label = [[UILabel alloc] init];
-    label.text = @"Not a traditional jailbreak: tweaks apply in real time over RemoteCall — no respring needed. Whenever a change kicks off an operation, a live log opens automatically; you can hide it any time. Force-quitting this app from the App Switcher stops live tweaks like StatBar and Axon Lite.";
+    label.text = @"Cyanide is not a permanent jailbreak — tweaks apply this session only and reset on reboot. Live tweaks like StatBar and Axon Lite stop if you force-quit Cyanide from the App Switcher. A progress log opens automatically while changes are applying; tap Hide to dismiss.";
     label.textColor = UIColor.labelColor;
     label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
     label.numberOfLines = 0;
@@ -2663,11 +2710,17 @@ typedef NS_ENUM(NSInteger, RootSection) {
         return (NSInteger)[self rowsForSection:self.underlyingSection].count;
     }
     switch ((RootSection)section) {
-        case RootSectionWarning:        return 1;
-        case RootSectionActions:        return 4;
+        case RootSectionChangelog: {
+            // Entries + one "See all releases on GitHub" footer row when the
+            // section is non-empty.
+            NSInteger n = (NSInteger)settings_changelog_entries().count;
+            return n > 0 ? n + 1 : 0;
+        }
+        case RootSectionActions:        return 3;
         case RootSectionTweakBundles:   return (NSInteger)self.tweakBundleRows.count;
         case RootSectionSystemBundles:  return (NSInteger)self.systemBundleRows.count;
         case RootSectionAbout:          return 4;
+        case RootSectionWarning:        return 1;
         case RootSectionCount:          return 0;
     }
     return 0;
@@ -2677,6 +2730,7 @@ typedef NS_ENUM(NSInteger, RootSection) {
 {
     if (self.detailMode) return nil;
     switch ((RootSection)section) {
+        case RootSectionChangelog:      return settings_changelog_entries().count > 0 ? @"What's New" : nil;
         case RootSectionActions:        return @"Quick Actions";
         case RootSectionTweakBundles:   return self.tweakBundleRows.count   > 0 ? @"Tweaks" : nil;
         case RootSectionSystemBundles:  return self.systemBundleRows.count  > 0 ? @"System" : nil;
@@ -2720,7 +2774,8 @@ typedef NS_ENUM(NSInteger, RootSection) {
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
     if (!self.detailMode) {
-        if (section == RootSectionWarning) return 18.0; // breathing room above warning
+        if ((RootSection)section == RootSectionWarning) return 18.0; // breathing room above the disclaimer
+        if ((RootSection)section == RootSectionChangelog     && settings_changelog_entries().count == 0) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionTweakBundles  && self.tweakBundleRows.count  == 0) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionSystemBundles && self.systemBundleRows.count == 0) return CGFLOAT_MIN;
     }
@@ -2772,6 +2827,64 @@ typedef NS_ENUM(NSInteger, RootSection) {
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     return cell;
+}
+
+- (UITableViewCell *)buildChangelogCellAtRow:(NSInteger)row tableView:(UITableView *)tableView
+{
+    NSArray<NSDictionary *> *entries = settings_changelog_entries();
+    NSDictionary *entry = (row >= 0 && row < (NSInteger)entries.count) ? entries[row] : nil;
+
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"changelog"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"changelog"];
+        cell.detailTextLabel.numberOfLines = 0;
+        cell.textLabel.numberOfLines = 1;
+    }
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.imageView.image = nil;
+    cell.textLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+    cell.textLabel.textColor = UIColor.labelColor;
+    cell.detailTextLabel.font = [UIFont systemFontOfSize:13.0];
+    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+
+    NSString *version = entry[@"version"] ?: @"";
+    NSString *date    = settings_pretty_date_for_iso(entry[@"date"]);
+    cell.textLabel.text = date.length
+        ? [NSString stringWithFormat:@"v%@  ·  %@", version, date]
+        : [NSString stringWithFormat:@"v%@", version];
+
+    NSArray *changes = entry[@"changes"];
+    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithCapacity:changes.count];
+    for (id c in changes) {
+        if (![c isKindOfClass:[NSString class]]) continue;
+        [lines addObject:[@"• " stringByAppendingString:(NSString *)c]];
+    }
+    cell.detailTextLabel.text = [lines componentsJoinedByString:@"\n"];
+
+    return cell;
+}
+
+- (UITableViewCell *)buildChangelogFooterCellInTableView:(UITableView *)tableView
+{
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"changelog-footer"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"changelog-footer"];
+    }
+    cell.imageView.image = nil;
+    cell.textLabel.text = @"See all releases on GitHub";
+    cell.textLabel.font = [UIFont systemFontOfSize:15.0];
+    cell.textLabel.textColor = self.view.tintColor;
+    cell.detailTextLabel.text = nil;
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    return cell;
+}
+
+- (void)openReleasesPage
+{
+    NSURL *url = [NSURL URLWithString:@"https://github.com/zeroxjf/cyanide-ios/releases"];
+    if (url) [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
 }
 
 - (UITableViewCell *)buildAboutCellAtRow:(NSInteger)row tableView:(UITableView *)tableView
@@ -2965,7 +3078,15 @@ static void cyanide_upload_log_if_enabled(void) {
     if (!self.detailMode) {
         switch ((RootSection)indexPath.section) {
             case RootSectionWarning:
-                break; // fall through to legacy SectionWarning rendering below
+                indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionWarning];
+                break;
+            case RootSectionChangelog: {
+                NSInteger entryCount = (NSInteger)settings_changelog_entries().count;
+                if (indexPath.row >= entryCount) {
+                    return [self buildChangelogFooterCellInTableView:tableView];
+                }
+                return [self buildChangelogCellAtRow:indexPath.row tableView:tableView];
+            }
             case RootSectionActions:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionActions];
                 break;
@@ -3003,42 +3124,36 @@ static void cyanide_upload_log_if_enabled(void) {
             anyInstalledOrQueued = [[PackageQueue sharedQueue] pendingCount] > 0;
         }
         BOOL rowEnabled = supported;
-        if (indexPath.row == 1) rowEnabled = cleanupEnabled;
-        if (indexPath.row == 3) rowEnabled = anyInstalledOrQueued;
+        if (indexPath.row == 0) rowEnabled = cleanupEnabled;
+        if (indexPath.row == 2) rowEnabled = anyInstalledOrQueued;
 
         UILabel *primary = [[UILabel alloc] init];
         primary.translatesAutoresizingMaskIntoConstraints = NO;
         primary.textAlignment = NSTextAlignmentCenter;
+        primary.font = [UIFont systemFontOfSize:17];
         if (indexPath.row == 0) {
-            primary.text = @"Run / Apply Tweaks";
-            primary.textColor = supported ? self.view.tintColor : UIColor.tertiaryLabelColor;
-            primary.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
-        } else if (indexPath.row == 1) {
             primary.text = g_settings_cleanup_running ? @" " : @"Clean Up";
             primary.textColor = cleanupEnabled ? UIColor.systemRedColor : UIColor.tertiaryLabelColor;
-            primary.font = [UIFont systemFontOfSize:17];
-        } else if (indexPath.row == 2) {
+        } else if (indexPath.row == 1) {
             primary.text = g_settings_respring_cleanup_running ? @" " : @"Respring";
             primary.textColor = supported ? UIColor.systemOrangeColor : UIColor.tertiaryLabelColor;
-            primary.font = [UIFont systemFontOfSize:17];
         } else {
             primary.text = @"Reset All Packages";
             primary.textColor = anyInstalledOrQueued ? UIColor.systemRedColor : UIColor.tertiaryLabelColor;
-            primary.font = [UIFont systemFontOfSize:17];
         }
         [cell.contentView addSubview:primary];
 
         // Clean Up + Respring rows: replace the label with a spinning indicator
         // while cleanup is in progress so the user sees we're not hung.
         BOOL showSpinner =
-            (indexPath.row == 1 && g_settings_cleanup_running) ||
-            (indexPath.row == 2 && g_settings_respring_cleanup_running);
+            (indexPath.row == 0 && g_settings_cleanup_running) ||
+            (indexPath.row == 1 && g_settings_respring_cleanup_running);
         if (showSpinner) {
             UIActivityIndicatorView *spin =
                 [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:
                     UIActivityIndicatorViewStyleMedium];
             spin.translatesAutoresizingMaskIntoConstraints = NO;
-            spin.color = (indexPath.row == 2) ? UIColor.systemOrangeColor : UIColor.systemRedColor;
+            spin.color = (indexPath.row == 1) ? UIColor.systemOrangeColor : UIColor.systemRedColor;
             spin.hidesWhenStopped = YES;
             [spin startAnimating];
             [cell.contentView addSubview:spin];
@@ -3059,10 +3174,7 @@ static void cyanide_upload_log_if_enabled(void) {
         UILayoutGuide *m = cell.contentView.layoutMarginsGuide;
         NSString *detailText = nil;
         UIColor *detailColor = UIColor.secondaryLabelColor;
-        if (indexPath.row == 0 && !supported) {
-            detailText = settings_unsupported_message();
-            detailColor = UIColor.systemRedColor;
-        } else if (indexPath.row == 1) {
+        if (indexPath.row == 0) {
             if (g_settings_cleanup_running) {
                 detailText = @"Cleaning up…";
                 detailColor = UIColor.secondaryLabelColor;
@@ -3072,12 +3184,12 @@ static void cyanide_upload_log_if_enabled(void) {
                     : @"No local KRW session.";
                 detailColor = cleanupEnabled ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
             }
-        } else if (indexPath.row == 2) {
+        } else if (indexPath.row == 1) {
             detailText = g_settings_respring_cleanup_running
                 ? @"Cleaning up…"
                 : @"Clean up is auto run prior to respring to ensure a clean state.";
             detailColor = supported ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
-        } else if (indexPath.row == 3) {
+        } else if (indexPath.row == 2) {
             detailText = anyInstalledOrQueued
                 ? @"Uninstall every package and clear the pending queue. SpringBoard patches already applied this session stay until respring/reboot."
                 : @"Nothing installed or queued.";
@@ -3291,6 +3403,13 @@ static void cyanide_upload_log_if_enabled(void) {
         switch ((RootSection)indexPath.section) {
             case RootSectionWarning:
                 return;
+            case RootSectionChangelog: {
+                NSInteger entryCount = (NSInteger)settings_changelog_entries().count;
+                if (indexPath.row >= entryCount) {
+                    [self openReleasesPage];
+                }
+                return;
+            }
             case RootSectionActions:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionActions];
                 break;
@@ -3328,16 +3447,6 @@ static void cyanide_upload_log_if_enabled(void) {
 
     if (indexPath.section == SectionActions) {
         if (indexPath.row == 0) {
-            // Present the live log first, then trigger the apply. The modal
-            // listens for kSettingsActionsDidCompleteNotification and is
-            // dismissable any time via the Hide/Done button or swipe-down.
-            InstallProgressViewController *logVC = [[InstallProgressViewController alloc] init];
-            UINavigationController *logNav = [[UINavigationController alloc] initWithRootViewController:logVC];
-            logNav.modalPresentationStyle = UIModalPresentationAutomatic;
-            [self presentViewController:logNav animated:YES completion:^{
-                settings_run_actions();
-            }];
-        } else if (indexPath.row == 1) {
             UIAlertController *ac = [UIAlertController
                 alertControllerWithTitle:@"Clean Up?"
                                  message:@"This is a terminal cleanup for the current app-side KRW session. It stops live SpringBoard tweak sessions, parks the KRW socket state, closes Cyanide's local KRW file descriptors, and clears the in-app exploit cache. The next Run will try launchd KRW recovery first; if that is unavailable, it will run the full chain again."
@@ -3351,7 +3460,7 @@ static void cyanide_upload_log_if_enabled(void) {
                 settings_queue_terminal_kexploit_cleanup("manual action");
             }]];
             settings_present_controller(ac, self);
-        } else if (indexPath.row == 2) {
+        } else if (indexPath.row == 1) {
             UIAlertController *ac = [UIAlertController
                 alertControllerWithTitle:@"Respring?"
                                  message:@"Are you sure you want to respring? SpringBoard will restart."
@@ -3390,7 +3499,7 @@ static void cyanide_upload_log_if_enabled(void) {
                 });
             }]];
             settings_present_controller(ac, self);
-        } else if (indexPath.row == 3) {
+        } else if (indexPath.row == 2) {
             UIAlertController *ac = [UIAlertController
                 alertControllerWithTitle:@"Reset All Packages?"
                                  message:@"This uninstalls every package and clears the pending queue. The next chain run will start fresh from a clean slate. SpringBoard patches already live in this session stay until you respring or reboot.\n\nThis does not touch your Run options, Powercuff level, SBCustomizer grid, or other per-tweak settings — only install state."

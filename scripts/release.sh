@@ -144,10 +144,22 @@ else
     echo "==> CURRENT_PROJECT_VERSION unchanged at $CURRENT_BUILD_VERSION"
 fi
 
-# 1. Build the IPA against the newly resolved MARKETING_VERSION and
-#    CURRENT_PROJECT_VERSION. build.sh writes build/Cyanide-${VERSION}.ipa and
-#    refreshes a build/Cyanide.ipa symlink. We build *before* committing so the
-#    actual IPA size can be baked into source.json in the same commit.
+# 1a. Regenerate Cyanide/Changelog.plist with the new version as the top entry,
+#     so the IPA we're about to build carries its own "What's New" content.
+#     Commits between the last release tag and HEAD become the changes list,
+#     plus the about-to-be-made release commit subject (if any) — pure
+#     "Bump …" lines are filtered as noise inside the generator.
+LAST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+CHANGELOG_PENDING_VERSION="$NEW_VERSION" \
+CHANGELOG_PENDING_BASE="$LAST_TAG" \
+CHANGELOG_PENDING_MSG="$MSG" \
+    ./scripts/gen-changelog.sh \
+    || echo "==> changelog generation failed (continuing without it)"
+
+# 1b. Build the IPA against the newly resolved MARKETING_VERSION and
+#     CURRENT_PROJECT_VERSION. build.sh writes build/Cyanide-${VERSION}.ipa and
+#     refreshes a build/Cyanide.ipa symlink. We build *before* committing so the
+#     actual IPA size can be baked into source.json in the same commit.
 ./scripts/build.sh
 
 # Read bundle versions from the just-built app. CFBundleShortVersionString
