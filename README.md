@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/zeroxjf/cyanide-ios/main/Cyanide/Assets.xcassets/AppIcon.appiconset/icon-ios-1024x1024.png" alt="Cyanide" width="160">
+  <img src="https://raw.githubusercontent.com/zeroxjf/cyanide/main/Cyanide/Assets.xcassets/AppIcon.appiconset/icon-ios-1024x1024.png" alt="Cyanide" width="160">
 </p>
 
 <h1 align="center">Cyanide</h1>
@@ -17,10 +17,10 @@ the browser-delivered WebKit/dyld parts of the original DarkSword chain.
 Open this page on your iPhone/iPad and tap one of the buttons below.
 
 <p align="center">
-  <a href="https://celloserenity.github.io/altdirect/?url=https://raw.githubusercontent.com/zeroxjf/cyanide-ios/main/source.json" target="_blank">
+  <a href="https://celloserenity.github.io/altdirect/?url=https://raw.githubusercontent.com/zeroxjf/cyanide/main/source.json" target="_blank">
     <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/AltSource_Blue.png?raw=true" alt="Add AltSource" width="200">
   </a>
-  <a href="https://github.com/zeroxjf/cyanide-ios/releases/latest" target="_blank">
+  <a href="https://github.com/zeroxjf/cyanide/releases/latest" target="_blank">
     <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/Download_Blue.png?raw=true" alt="Download .ipa" width="200">
   </a>
 </p>
