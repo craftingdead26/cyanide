@@ -42,6 +42,7 @@ MSG="${1:-}"
 NOTES_ARG="${2:-}"
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 PBXPROJ="Cyanide.xcodeproj/project.pbxproj"
+RELEASE_NOTES_FILE="RELEASE_NOTES.md"
 
 # --- versioning -------------------------------------------------------------
 
@@ -143,6 +144,81 @@ dirty_submodule_paths() {
             printf '%s\n' "$path"
         fi
     done < <(submodule_paths)
+}
+
+pending_release_note_bullets() {
+    [ -f "$RELEASE_NOTES_FILE" ] || return 0
+    awk '
+        /^##[[:space:]]+Pending[[:space:]]*$/ { pending = 1; next }
+        pending && /^##[[:space:]]+/ { exit }
+        pending { print }
+    ' "$RELEASE_NOTES_FILE" \
+        | sed -nE 's/^-+[[:space:]]+\[[[:space:]]\][[:space:]]+(.+[^[:space:]])[[:space:]]*$/\1/p'
+}
+
+combine_release_bullets() {
+    printf '%s\n%s\n' "${1:-}" "${2:-}" \
+        | sed -e '/^[[:space:]]*$/d' \
+        | awk '!seen[tolower($0)]++'
+}
+
+mark_pending_release_notes_released() {
+    local version="$1"
+    local release_date="$2"
+    [ -f "$RELEASE_NOTES_FILE" ] || return 0
+    python3 - "$RELEASE_NOTES_FILE" "$version" "$release_date" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+version = sys.argv[2]
+release_date = sys.argv[3]
+lines = path.read_text().splitlines()
+
+out = []
+pending = []
+in_pending = False
+for line in lines:
+    if re.match(r"^##\s+Pending\s*$", line):
+        in_pending = True
+        out.append(line)
+        continue
+    if in_pending and re.match(r"^##\s+", line):
+        in_pending = False
+    if in_pending:
+        match = re.match(r"^-\s+\[\s\]\s+(.+?)\s*$", line)
+        if match:
+            pending.append(match.group(1))
+            continue
+    out.append(line)
+
+if not pending:
+    sys.exit(0)
+
+released_index = None
+for i, line in enumerate(out):
+    if re.match(r"^##\s+Released\s*$", line):
+        released_index = i
+        break
+
+if released_index is None:
+    if out and out[-1].strip():
+        out.append("")
+    out.extend(["## Released"])
+    released_index = len(out) - 1
+
+entry = [f"### v{version} - {release_date}", ""]
+entry.extend(f"- [x] {bullet}" for bullet in pending)
+entry.append("")
+
+insert_at = released_index + 1
+while insert_at < len(out) and out[insert_at].strip() == "":
+    insert_at += 1
+
+out = out[:released_index + 1] + [""] + entry + out[insert_at:]
+path.write_text("\n".join(out).rstrip() + "\n")
+PY
 }
 
 commit_dirty_submodules() {
@@ -312,12 +388,14 @@ compute_extra_bullets() {
     printf '%s' "$out"
 }
 
-EXTRA_BULLETS=""
+MANUAL_RELEASE_BULLETS="$(pending_release_note_bullets)"
+AUTO_RELEASE_BULLETS=""
 if [ "$TREE_WAS_DIRTY" = "1" ] && [ -z "${RELEASE_NO_AUTO_BULLETS:-}" ]; then
-    EXTRA_BULLETS="$(compute_extra_bullets)"
+    AUTO_RELEASE_BULLETS="$(compute_extra_bullets)"
 fi
+EXTRA_BULLETS="$(combine_release_bullets "$MANUAL_RELEASE_BULLETS" "$AUTO_RELEASE_BULLETS")"
 if [ -n "$EXTRA_BULLETS" ]; then
-    echo "==> auto-derived changelog bullets:"
+    echo "==> release-note bullets:"
     printf '%s' "$EXTRA_BULLETS" | sed 's/^/      - /'
 fi
 
@@ -370,6 +448,7 @@ if [ ! -f "$IPA" ]; then
     exit 1
 fi
 EFFECTIVE_TAG="${TAG:-v${VERSION}}"
+RELEASE_DATE=$(date '+%Y-%m-%d')
 
 # 2. Refresh source.json (AltSource manifest) so AltStore/SideStore clients
 #    pull the new release automatically. Updates version, date, size,
@@ -382,7 +461,6 @@ if [ -f "$SOURCE_JSON" ]; then
         | sed -E 's#^(https?://[^/]+/|git@[^:]+:)##' \
         | sed -E 's#\.git$##')
     DOWNLOAD_URL="https://github.com/${REPO_SLUG_FOR_JSON}/releases/download/${EFFECTIVE_TAG}/Cyanide-${VERSION}.ipa"
-    RELEASE_DATE=$(date '+%Y-%m-%d')
     echo "==> refreshing $SOURCE_JSON: version=$VERSION size=$IPA_BYTES"
     python3 - <<PY
 import json
@@ -398,6 +476,11 @@ with open(path, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
 PY
+fi
+
+if [ -n "$MANUAL_RELEASE_BULLETS" ]; then
+    echo "==> marking pending release notes as v$VERSION"
+    mark_pending_release_notes_released "$VERSION" "$RELEASE_DATE"
 fi
 
 commit_dirty_submodules "$DIRTY_SUBMODULES_BEFORE"
