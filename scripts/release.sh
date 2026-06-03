@@ -390,7 +390,9 @@ compute_extra_bullets() {
 
 MANUAL_RELEASE_BULLETS="$(pending_release_note_bullets)"
 AUTO_RELEASE_BULLETS=""
-if [ "$TREE_WAS_DIRTY" = "1" ] && [ -z "${RELEASE_NO_AUTO_BULLETS:-}" ]; then
+if [ -z "$MANUAL_RELEASE_BULLETS" ] &&
+   [ "$TREE_WAS_DIRTY" = "1" ] &&
+   [ -z "${RELEASE_NO_AUTO_BULLETS:-}" ]; then
     AUTO_RELEASE_BULLETS="$(compute_extra_bullets)"
 fi
 EXTRA_BULLETS="$(combine_release_bullets "$MANUAL_RELEASE_BULLETS" "$AUTO_RELEASE_BULLETS")"
