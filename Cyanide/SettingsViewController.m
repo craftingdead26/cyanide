@@ -6188,7 +6188,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"experimental"];
         cell.detailTextLabel.numberOfLines = 0;
     }
-    BOOL on = [[NSUserDefaults standardUserDefaults] boolForKey:kSettingsExperimentalTweaksEnabled];
+    BOOL on = settings_experimental_tweaks_enabled();
 
     UIColor *iconColor = on ? UIColor.systemRedColor
                             : [UIColor.systemRedColor colorWithAlphaComponent:0.55];
@@ -6236,6 +6236,12 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     BOOL enabling = sw.isOn;
 
     if (enabling) {
+        if (!settings_experimental_access_allowed()) {
+            sw.on = NO;
+            [d setBool:NO forKey:kSettingsExperimentalTweaksEnabled];
+            [self reloadAfterExperimentalChange];
+            return;
+        }
         // Hard confirm before flipping master on. If the user cancels, revert
         // the switch and stop here.
         sw.on = NO;
