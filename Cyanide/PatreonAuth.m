@@ -210,19 +210,12 @@ BOOL cyanide_patreon_is_linked(void)
 
 BOOL cyanide_is_patron(void)
 {
-    NSDictionary *p = current_payload();
-    if (!p) return NO;
-    if (patreon_payload_bool(p, @"is_comped")) return YES;
-    if (patreon_payload_is_comped_username(p)) return YES;
-    id v = p[@"is_patron"];
-    return [v isKindOfClass:[NSNumber class]] && [v boolValue];
+    return YES;
 }
 
 BOOL cyanide_is_creator(void)
 {
-    NSDictionary *p = current_payload();
-    NSString *tier = [p[@"tier"] isKindOfClass:[NSString class]] ? p[@"tier"] : nil;
-    return [tier isEqualToString:@"Creator"];
+    return YES;
 }
 
 NSString *cyanide_patreon_display_name(void)

@@ -34,10 +34,9 @@ Open this page on your iPhone/iPad and tap one of the buttons below.
 
 ## Patreon
 
-Early access to experimental tweaks (Dynamic Stage Lite, Signal Readouts,
-TypeBanner, Location Simulator, Call Recording Sound, and future work) is
-available to [Patreon supporters](https://www.patreon.com/zeroxjf) at the
-Member tier and above.
+Experimental tweaks (Dynamic Stage Lite, Signal Readouts, TypeBanner,
+Location Simulator, Call Recording Sound, and future work) are available to
+all users.
 
 ## Tweaks
 
@@ -114,7 +113,7 @@ Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tw
 
 > ⚠︎ Unstable or in-development — require Experimental Tweaks to be enabled in Settings.
 >
-> Experimental tweaks ship early to [Patreon supporters](https://www.patreon.com/zeroxjf) before public release.
+> Experimental tweaks are available in-app when Experimental Tweaks are enabled.
 
 - **Dynamic Stage Lite**: brings Stage Manager-style split-view to iPhone over
   RemoteCall — no jailbreak required. Hosts a second app's scene alongside
@@ -242,8 +241,7 @@ The `Cyanide/tweaks/private/` submodule points at a separate private
 repository containing the closed-source experimental tweak
 implementations. Those files are
 **All Rights Reserved**, distributed in compiled form only inside
-official Cyanide releases, and gated to active Patreon supporters at the
-Member tier or above. Public clones won't be able to fetch the
+official Cyanide releases. Public clones won't be able to fetch the
 submodule, and the experimental tweaks will be absent from local builds
 unless you re-implement them. The public app target still builds without
 that submodule.
